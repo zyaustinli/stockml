@@ -1,3 +1,5 @@
+#everything based on dataquest tutorial
+
 import yfinance as yf
 import os
 import pandas as pd
@@ -30,13 +32,38 @@ predictors = ["Close", "Volume", "Open", "High", "Low"]
 closed_data = closed_data.join(tsla_shifted[predictors]).iloc[1:] #start at one to use data from previous day
 
 model = RandomForestClassifier(n_estimators=100, min_samples_split=200, random_state=1)
-train = closed_data.iloc[:-100]
-test = closed_data.iloc[-100:] 
-model.fit(train[predictors], train["Target"])
+def backtest(data, model, predictors, start=1000, step=750):
+    predictions = []
+    for i in range(start, data.shape[0], step):
+        train = data.iloc[0:i].copy()
+        test = data.iloc[i:(i+step)].copy()
 
-predicts= model.predict(test[predictors])
-predicts = pd.Series(predicts, index=test.index)
-precision_score(test["Target"], predicts)
+        model.fit(train[predictors], train["Target"])
 
+        preds = model.predict_proba(test[predictors])[:,1]
+        preds = pd.Series(preds, index=test.index)
+        preds[preds > .6] = 1
+        preds[preds<=.6] = 0
 
+        combined = pd.concat({"Target": test["Target"],"Predictions": preds}, axis=1)
 
+        predictions.append(combined)
+
+    return pd.concat(predictions)
+predictions = backtest(data, model, predictors)
+weekly_mean = data.rolling(7).mean()["Close"]
+quarterly_mean = data.rolling(90).mean()["Close"]
+annual_mean = data.rolling(365).mean()["Close"]
+weekly_trend = data.shift(1).rolling(7).sum()["Target"]
+data["weekly_mean"] = weekly_mean / data["Close"]
+data["quarterly_mean"] = quarterly_mean / data["Close"]
+data["annual_mean"] = annual_mean / data["Close"]
+data["annual_weekly_mean"] = data["annual_mean"] / data["weekly_mean"]
+data["annual_quarterly_mean"] = data["annual_mean"] / data["quarterly_mean"]
+data["weekly_trend"] = weekly_trend
+data["open_close_ratio"] = data["Open"] / data["Close"]
+data["high_close_ratio"] = data["High"] / data["Close"]
+data["low_close_ratio"] = data["Low"] / data["Close"]
+full_predictors = predictors + ["weekly_mean", "quarterly_mean", "annual_mean", "annual_weekly_mean", "annual_quarterly_mean", "open_close_ratio", "hig
+predictions = backtest(data.iloc[365:], model, full_predictors)
+print(precision_score(predictions["Target"], predictions["Predictions"]))
